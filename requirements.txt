@@ -1,0 +1,6 @@
+streamlit
+evds
+pandas
+python-dateutil
+openpyxl
+plotly
