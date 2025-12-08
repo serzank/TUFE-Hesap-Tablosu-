@@ -3,138 +3,161 @@ from evds import evdsAPI
 import pandas as pd
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
+import plotly.express as px
 
 # --- KULLANICI AYARLARI ---
 USER_API_KEY = "Uol1kIOQos"
 
 # --- Sayfa Ayarları ---
-st.set_page_config(page_title="TAV Fiyat Farkı Analizi", layout="wide")
+st.set_page_config(page_title="TAV Özel Tarihli Fiyat Farkı", layout="wide")
 
-st.title("📈 Satın Alma Fiyat Farkı & Artış Analizi")
+st.title("🧮 İki Tarih Arası Fiyat Farkı Hesaplama")
 st.markdown("""
-Bu araç, tanımlı API anahtarı üzerinden **TÜFE**, **Yİ-ÜFE** ve **(TÜFE+ÜFE)/2** artış oranlarını otomatik hesaplar.
+Bu araç, seçilen **Başlangıç** ve **Bitiş** ayları arasındaki TÜFE, Yİ-ÜFE ve Ortalama artış oranını hesaplar.
+Özellikle sözleşme başı ile güncel hakediş dönemi arasındaki net farkı bulmak için tasarlanmıştır.
 """)
 
 # --- Sidebar ---
-st.sidebar.header("Dönem Seçimi")
+st.sidebar.header("Tarih Aralığı Seçimi")
 
-# Varsayılan tarih ayarı (Geçen ay)
+# Varsayılanlar
 today = date.today()
-first_day_of_current_month = today.replace(day=1)
-default_date = first_day_of_current_month - relativedelta(months=1)
+default_end = today.replace(day=1) - relativedelta(months=1) # Geçen ay
+default_start = default_end - relativedelta(months=12) # 1 yıl öncesi
 
-ref_date = st.sidebar.date_input("Analiz Edilecek Dönem (Referans Ay)", default_date)
+start_date = st.sidebar.date_input("Başlangıç Tarihi (Baz Ay)", default_start)
+end_date = st.sidebar.date_input("Bitiş Tarihi (Güncel Ay)", default_end)
 
+st.sidebar.info("Not: Gün gün değil, seçilen tarihlerin ait olduğu **AY** baz alınır.")
 st.sidebar.markdown("---")
 st.sidebar.success("✅ API Bağlantısı Hazır")
 
 # --- Yardımcı Fonksiyonlar ---
-def get_inflation_data(api_key, target_date):
+def get_custom_range_data(api_key, start, end):
     evds = evdsAPI(api_key)
     
-    # Tarihleri belirle
-    dates_to_fetch = {
-        "Seçilen Ay": target_date,
-        "1 Ay Önce": target_date - relativedelta(months=1),
-        "3 Ay Önce": target_date - relativedelta(months=3),
-        "6 Ay Önce": target_date - relativedelta(months=6),
-        "1 Yıl Önce": target_date - relativedelta(months=12),
-        "Yılbaşı (Önceki Aralık)": date(target_date.year - 1, 12, 1)
-    }
+    # Tarih Kontrolü
+    if start >= end:
+        return None, "Başlangıç tarihi, bitiş tarihinden önce olmalıdır."
     
-    # API sorgusu için tarih aralığı
-    start_date_query = min(dates_to_fetch.values()).replace(day=1).strftime("%d-%m-%Y")
-    end_date_query = target_date.replace(day=1).strftime("%d-%m-%Y")
+    # API sorgusu için format (GG-AA-YYYY)
+    start_str = start.replace(day=1).strftime("%d-%m-%Y")
+    end_str = end.replace(day=1).strftime("%d-%m-%Y")
     
-    series = ["TP.FG.J0", "TP.TUFE1YI.T1"] 
+    series = ["TP.FG.J0", "TP.TUFE1YI.T1"]
     
     try:
-        raw_df = evds.get_data(series, startdate=start_date_query, enddate=end_date_query)
+        raw_df = evds.get_data(series, startdate=start_str, enddate=end_str)
     except Exception as e:
-        return None, f"Veri çekilirken hata oluştu: {str(e)}"
+        return None, f"Veri çekilemedi: {str(e)}"
     
-    # Tarih formatlama
+    # Veri işleme
     raw_df['Tarih_Dt'] = pd.to_datetime(raw_df['Tarih'], format='%Y-%m')
+    raw_df.rename(columns={
+        "TP_FG_J0": "TÜFE",
+        "TP_TUFE1YI_T1": "Yİ-ÜFE",
+        "Tarih": "Dönem"
+    }, inplace=True)
     
-    results = []
+    # Sadece sayısal sütunları float'a çevir (NaN hatalarını önlemek için)
+    raw_df["TÜFE"] = pd.to_numeric(raw_df["TÜFE"], errors='coerce')
+    raw_df["Yİ-ÜFE"] = pd.to_numeric(raw_df["Yİ-ÜFE"], errors='coerce')
     
-    target_period = pd.Period(target_date, freq='M')
-    current_row = raw_df[raw_df['Tarih_Dt'].dt.to_period('M') == target_period]
+    # Başlangıç ve Bitiş değerlerini bulma
+    # Start period
+    start_period = pd.Period(start, freq='M')
+    end_period = pd.Period(end, freq='M')
     
-    if current_row.empty:
-        return None, "Seçilen tarih için TCMB henüz veri açıklamamış olabilir."
-
-    if pd.isna(current_row["TP_FG_J0"].values[0]) or pd.isna(current_row["TP_TUFE1YI_T1"].values[0]):
-        return None, "Seçilen ay için veri boş görünüyor."
-
-    tufe_current = float(current_row["TP_FG_J0"].values[0])
-    ufe_current = float(current_row["TP_TUFE1YI_T1"].values[0])
+    start_row = raw_df[raw_df['Tarih_Dt'].dt.to_period('M') == start_period]
+    end_row = raw_df[raw_df['Tarih_Dt'].dt.to_period('M') == end_period]
     
-    for label, d in dates_to_fetch.items():
-        if label == "Seçilen Ay": continue
+    if start_row.empty or end_row.empty:
+        return None, "Seçilen tarihlerden biri için TCMB verisi bulunamadı."
         
-        past_period = pd.Period(d, freq='M')
-        past_row = raw_df[raw_df['Tarih_Dt'].dt.to_period('M') == past_period]
-        
-        if not past_row.empty:
-            val_tufe = past_row["TP_FG_J0"].values[0]
-            val_ufe = past_row["TP_TUFE1YI_T1"].values[0]
+    if start_row.isnull().values.any() or end_row.isnull().values.any():
+        return None, "Seçilen dönemde veri eksik."
 
-            if pd.notna(val_tufe) and pd.notna(val_ufe):
-                tufe_old = float(val_tufe)
-                ufe_old = float(val_ufe)
-                
-                # Artış Oranları
-                tufe_change = ((tufe_current - tufe_old) / tufe_old) * 100
-                ufe_change = ((ufe_current - ufe_old) / ufe_old) * 100
-                
-                # ORTALAMA HESABI (Yeni Eklenen Kısım)
-                avg_change = (tufe_change + ufe_change) / 2
-                
-                results.append({
-                    "Dönem": label,
-                    "Kıyaslanan Tarih": d.strftime("%B %Y"),
-                    "TÜFE Artışı (%)": round(tufe_change, 2),
-                    "Yİ-ÜFE Artışı (%)": round(ufe_change, 2),
-                    "Ortalama (T+Ü)/2": round(avg_change, 2), # Yeni Sütun
-                    "TÜFE Endeks": tufe_old,
-                    "ÜFE Endeks": ufe_old
-                })
-            
-    return pd.DataFrame(results), None
+    # Değerleri al
+    s_tufe = float(start_row["TÜFE"].values[0])
+    s_ufe = float(start_row["Yİ-ÜFE"].values[0])
+    
+    e_tufe = float(end_row["TÜFE"].values[0])
+    e_ufe = float(end_row["Yİ-ÜFE"].values[0])
+    
+    # Hesaplamalar
+    tufe_degisim = ((e_tufe - s_tufe) / s_tufe) * 100
+    ufe_degisim = ((e_ufe - s_ufe) / s_ufe) * 100
+    avg_degisim = (tufe_degisim + ufe_degisim) / 2
+    
+    summary = {
+        "Başlangıç Dönemi": start.strftime("%B %Y"),
+        "Bitiş Dönemi": end.strftime("%B %Y"),
+        "TÜFE Artış (%)": tufe_degisim,
+        "Yİ-ÜFE Artış (%)": ufe_degisim,
+        "Ortalama (T+Ü)/2 (%)": avg_degisim,
+        "Başlangıç TÜFE": s_tufe,
+        "Bitiş TÜFE": e_tufe,
+        "Başlangıç ÜFE": s_ufe,
+        "Bitiş ÜFE": e_ufe
+    }
+    
+    return summary, raw_df, None
 
 # --- Ana Ekran ---
 
-if st.button("Analizi Başlat"):
-    with st.spinner('TCMB verileri işleniyor...'):
-        df_result, error = get_inflation_data(USER_API_KEY, ref_date)
+if st.button("Hesapla"):
+    with st.spinner('Veriler analiz ediliyor...'):
+        summary, trend_df, error = get_custom_range_data(USER_API_KEY, start_date, end_date)
         
         if error:
             st.error(error)
         else:
-            st.success(f"✅ {ref_date.strftime('%B %Y')} Referanslı Analiz Tamamlandı")
+            # 1. SONUÇ KARTLARI (Büyük Puanlar)
+            st.success(f"Analiz Dönemi: {summary['Başlangıç Dönemi']} ➡️ {summary['Bitiş Dönemi']}")
             
-            st.subheader("📊 Fiyat Farkı Tablosu")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("TÜFE Artışı", f"%{summary['TÜFE Artış (%)']:.2f}", delta_color="inverse")
+            with c2:
+                st.metric("Yİ-ÜFE Artışı", f"%{summary['Yİ-ÜFE Artış (%)']:.2f}", delta_color="inverse")
+            with c3:
+                st.metric("Ortalama (T+Ü)/2", f"%{summary['Ortalama (T+Ü)/2 (%)']:.2f}", "Sözleşme Farkı")
+
+            st.divider()
+
+            # 2. DETAY TABLOSU
+            st.subheader("📋 Detaylı Hesap Tablosu")
             
-            # Tablo Formatlama (Yeni sütunu da ekledik)
+            # Tablo verisini hazırlayalım
+            detail_data = {
+                "Endeks Tipi": ["TÜFE (Tüketici)", "Yİ-ÜFE (Üretici)", "Ortalama"],
+                "Başlangıç Endeksi": [summary["Başlangıç TÜFE"], summary["Başlangıç ÜFE"], "-"],
+                "Bitiş Endeksi": [summary["Bitiş TÜFE"], summary["Bitiş ÜFE"], "-"],
+                "Değişim Oranı (%)": [summary["TÜFE Artış (%)"], summary["Yİ-ÜFE Artış (%)"], summary["Ortalama (T+Ü)/2 (%)"]]
+            }
+            df_display = pd.DataFrame(detail_data)
+            
             st.dataframe(
-                df_result.style.format({
-                    "TÜFE Artışı (%)": "{:.2f}%",
-                    "Yİ-ÜFE Artışı (%)": "{:.2f}%",
-                    "Ortalama (T+Ü)/2": "{:.2f}%", # Format ayarı
-                    "TÜFE Endeks": "{:.2f}",
-                    "ÜFE Endeks": "{:.2f}"
-                }),
-                use_container_width=True,
-                height=300
+                df_display.style.format({
+                    "Başlangıç Endeksi": "{:.2f}",
+                    "Bitiş Endeksi": "{:.2f}",
+                    "Değişim Oranı (%)": "%{:.2f}"
+                }), 
+                use_container_width=True
             )
-            
-            st.info("İpucu: 'Ortalama (T+Ü)/2' sütunu, sözleşmelerdeki aritmetik ortalama formülü için hesaplanmıştır.")
-            
-            csv = df_result.to_csv(index=False).encode('utf-8')
+
+            # 3. GRAFİK (Trendi Görmek İçin)
+            st.subheader("📈 Dönem İçindeki Seyir")
+            if trend_df is not None:
+                fig = px.line(trend_df, x="Dönem", y=["TÜFE", "Yİ-ÜFE"], markers=True, 
+                              title="Seçilen Tarih Aralığındaki Endeks Değişimi")
+                st.plotly_chart(fig, use_container_width=True)
+
+            # 4. İNDİRME
+            csv = df_display.to_csv(index=False).encode('utf-8')
             st.download_button(
-                "📥 Raporu İndir (CSV)",
+                "📥 Hesap Tablosunu İndir",
                 csv,
-                f"enflasyon_fark_analizi_{ref_date}.csv",
+                f"fiyat_farki_{start_date}_{end_date}.csv",
                 "text/csv"
             )
