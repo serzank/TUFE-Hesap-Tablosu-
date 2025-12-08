@@ -38,7 +38,7 @@ def get_custom_range_data(api_key, start, end):
     
     # Tarih Kontrolü
     if start >= end:
-        return None, "Başlangıç tarihi, bitiş tarihinden önce olmalıdır."
+        return None, "Başlangıç tarihi, bitiş tarihinden önce olmalıdır.", None
     
     # API sorgusu için format (GG-AA-YYYY)
     start_str = start.replace(day=1).strftime("%d-%m-%Y")
@@ -49,9 +49,12 @@ def get_custom_range_data(api_key, start, end):
     try:
         raw_df = evds.get_data(series, startdate=start_str, enddate=end_str)
     except Exception as e:
-        return None, f"Veri çekilemedi: {str(e)}"
+        return None, f"Veri çekilemedi: {str(e)}", None
     
     # Veri işleme
+    if raw_df is None or raw_df.empty:
+        return None, "TCMB'den veri dönmedi.", None
+
     raw_df['Tarih_Dt'] = pd.to_datetime(raw_df['Tarih'], format='%Y-%m')
     raw_df.rename(columns={
         "TP_FG_J0": "TÜFE",
@@ -64,7 +67,6 @@ def get_custom_range_data(api_key, start, end):
     raw_df["Yİ-ÜFE"] = pd.to_numeric(raw_df["Yİ-ÜFE"], errors='coerce')
     
     # Başlangıç ve Bitiş değerlerini bulma
-    # Start period
     start_period = pd.Period(start, freq='M')
     end_period = pd.Period(end, freq='M')
     
@@ -72,10 +74,10 @@ def get_custom_range_data(api_key, start, end):
     end_row = raw_df[raw_df['Tarih_Dt'].dt.to_period('M') == end_period]
     
     if start_row.empty or end_row.empty:
-        return None, "Seçilen tarihlerden biri için TCMB verisi bulunamadı."
+        return None, "Seçilen tarihlerden biri için TCMB verisi bulunamadı.", None
         
     if start_row.isnull().values.any() or end_row.isnull().values.any():
-        return None, "Seçilen dönemde veri eksik."
+        return None, "Seçilen dönemde veri eksik.", None
 
     # Değerleri al
     s_tufe = float(start_row["TÜFE"].values[0])
@@ -112,41 +114,54 @@ if st.button("Hesapla"):
         if error:
             st.error(error)
         else:
-            # 1. SONUÇ KARTLARI (Büyük Puanlar)
+            # 1. SONUÇ KARTLARI
             st.success(f"Analiz Dönemi: {summary['Başlangıç Dönemi']} ➡️ {summary['Bitiş Dönemi']}")
             
             c1, c2, c3 = st.columns(3)
             with c1:
-                st.metric("TÜFE Artışı", f"%{summary['TÜFE Artış (%)']:.2f}", delta_color="inverse")
+                st.metric("TÜFE Artışı", f"%{summary['TÜFE Artış (%)']:.2f}")
             with c2:
-                st.metric("Yİ-ÜFE Artışı", f"%{summary['Yİ-ÜFE Artış (%)']:.2f}", delta_color="inverse")
+                st.metric("Yİ-ÜFE Artışı", f"%{summary['Yİ-ÜFE Artış (%)']:.2f}")
             with c3:
-                st.metric("Ortalama (T+Ü)/2", f"%{summary['Ortalama (T+Ü)/2 (%)']:.2f}", "Sözleşme Farkı")
+                st.metric("Ortalama (T+Ü)/2", f"%{summary['Ortalama (T+Ü)/2 (%)']:.2f}", delta="Sözleşme Farkı")
 
             st.divider()
 
-            # 2. DETAY TABLOSU
+            # 2. DETAY TABLOSU (GÜNCELLENDİ)
             st.subheader("📋 Detaylı Hesap Tablosu")
             
-            # Tablo verisini hazırlayalım
+            # "-" yerine None kullanıyoruz ki sayı formatı hata vermesin
             detail_data = {
                 "Endeks Tipi": ["TÜFE (Tüketici)", "Yİ-ÜFE (Üretici)", "Ortalama"],
-                "Başlangıç Endeksi": [summary["Başlangıç TÜFE"], summary["Başlangıç ÜFE"], "-"],
-                "Bitiş Endeksi": [summary["Bitiş TÜFE"], summary["Bitiş ÜFE"], "-"],
+                "Başlangıç Endeksi": [summary["Başlangıç TÜFE"], summary["Başlangıç ÜFE"], None],
+                "Bitiş Endeksi": [summary["Bitiş TÜFE"], summary["Bitiş ÜFE"], None],
                 "Değişim Oranı (%)": [summary["TÜFE Artış (%)"], summary["Yİ-ÜFE Artış (%)"], summary["Ortalama (T+Ü)/2 (%)"]]
             }
             df_display = pd.DataFrame(detail_data)
             
+            # Yeni ve Güvenli Gösterim Yöntemi: column_config
             st.dataframe(
-                df_display.style.format({
-                    "Başlangıç Endeksi": "{:.2f}",
-                    "Bitiş Endeksi": "{:.2f}",
-                    "Değişim Oranı (%)": "%{:.2f}"
-                }), 
-                use_container_width=True
+                df_display,
+                column_config={
+                    "Endeks Tipi": "Tip",
+                    "Başlangıç Endeksi": st.column_config.NumberColumn(
+                        "Başlangıç Endeksi",
+                        format="%.2f"
+                    ),
+                    "Bitiş Endeksi": st.column_config.NumberColumn(
+                        "Bitiş Endeksi",
+                        format="%.2f"
+                    ),
+                    "Değişim Oranı (%)": st.column_config.NumberColumn(
+                        "Değişim Oranı",
+                        format="%.2f %%"
+                    ),
+                },
+                use_container_width=True,
+                hide_index=True
             )
 
-            # 3. GRAFİK (Trendi Görmek İçin)
+            # 3. GRAFİK
             st.subheader("📈 Dönem İçindeki Seyir")
             if trend_df is not None:
                 fig = px.line(trend_df, x="Dönem", y=["TÜFE", "Yİ-ÜFE"], markers=True, 
