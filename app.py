@@ -74,7 +74,7 @@ def get_custom_range_data(api_key, start, end):
     end_row = raw_df[raw_df['Tarih_Dt'].dt.to_period('M') == end_period]
     
     if start_row.empty or end_row.empty:
-    return None, None, "Seçilen tarihlerden biri için TCMB verisi bulunamadı."
+        return None, None, "Seçilen tarihlerden biri için TCMB verisi bulunamadı."
         
     if start_row.isnull().values.any() or end_row.isnull().values.any():
         return None, "Seçilen dönemde veri eksik.", None
@@ -187,4 +187,5 @@ if st.button("Hesapla"):
                 f"fiyat_farki_{start_date}_{end_date}.csv",
                 "text/csv"
             )
+
 
