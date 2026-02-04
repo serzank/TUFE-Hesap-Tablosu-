@@ -108,29 +108,35 @@ def get_custom_range_data(api_key, start, end):
 # --- Ana Ekran ---
 
 if st.button("Hesapla"):
-    with st.spinner('Veriler analiz ediliyor...'):
+    with st.spinner('TCMB EVDS verileri çekiliyor...'):
+        # Verileri fonksiyondan alıyoruz
         summary, trend_df, error = get_custom_range_data(USER_API_KEY, start_date, end_date)
         
+        # 1. KONTROL: Fonksiyon hata döndürdü mü?
         if error:
-            # Hata varsa kullanıcıya göster ve alt satırlara geçme
-            st.error(f"❌ {error}")
+            st.error(f"Veri çekme hatası: {error}")
+            st.info("İpucu: Seçilen aylara ait veriler TCMB tarafından henüz açıklanmamış olabilir veya API anahtarınız hatalıdır.")
         
-        elif summary is not None:
-            # 1. SONUÇ KARTLARI (Sadece veri varsa çalışır)
+        # 2. KONTROL: Summary gerçekten bir sözlük mü?
+        elif summary is not None and isinstance(summary, dict):
+            # Analiz Dönemi Bilgisi
             st.success(f"Analiz Dönemi: {summary.get('Başlangıç Dönemi')} ➡️ {summary.get('Bitiş Dönemi')}")
             
+            # --- SONUÇ KARTLARI ---
             c1, c2, c3 = st.columns(3)
             with c1:
                 st.metric("TÜFE Artışı", f"%{summary['TÜFE Artış (%)']:.2f}")
             with c2:
                 st.metric("Yİ-ÜFE Artışı", f"%{summary['Yİ-ÜFE Artış (%)']:.2f}")
             with c3:
-                st.metric("Ortalama (T+Ü)/2", f"%{summary['Ortalama (T+Ü)/2 (%)']:.2f}", delta="Sözleşme Farkı")
+                st.metric("Ortalama (T+Ü)/2", f"%{summary['Ortalama (T+Ü)/2 (%)']:.2f}")
 
             st.divider()
 
-            # 2. DETAY TABLOSU
+            # --- DETAY TABLOSU ---
             st.subheader("📋 Detaylı Hesap Tablosu")
+            
+            # Burada summary artik garanti altinda oldugu icin hata almayacaksiniz
             detail_data = {
                 "Endeks Tipi": ["TÜFE (Tüketici)", "Yİ-ÜFE (Üretici)", "Ortalama"],
                 "Başlangıç Endeksi": [summary["Başlangıç TÜFE"], summary["Başlangıç ÜFE"], None],
@@ -138,68 +144,14 @@ if st.button("Hesapla"):
                 "Değişim Oranı (%)": [summary["TÜFE Artış (%)"], summary["Yİ-ÜFE Artış (%)"], summary["Ortalama (T+Ü)/2 (%)"]]
             }
             df_display = pd.DataFrame(detail_data)
-            
             st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-            # 3. GRAFİK
+            # --- GRAFİK ---
             if trend_df is not None:
                 st.subheader("📈 Dönem İçindeki Seyir")
                 fig = px.line(trend_df, x="Dönem", y=["TÜFE", "Yİ-ÜFE"], markers=True)
                 st.plotly_chart(fig, use_container_width=True)
+        
+        # 3. KONTROL: Beklenmedik bir boş dönme durumu
         else:
-            st.warning("Beklenmedik bir veri hatası oluştu.")
-
-            st.divider()
-
-            # 2. DETAY TABLOSU (GÜNCELLENDİ)
-            st.subheader("📋 Detaylı Hesap Tablosu")
-            
-            # "-" yerine None kullanıyoruz ki sayı formatı hata vermesin
-            detail_data = {
-                "Endeks Tipi": ["TÜFE (Tüketici)", "Yİ-ÜFE (Üretici)", "Ortalama"],
-                "Başlangıç Endeksi": [summary["Başlangıç TÜFE"], summary["Başlangıç ÜFE"], None],
-                "Bitiş Endeksi": [summary["Bitiş TÜFE"], summary["Bitiş ÜFE"], None],
-                "Değişim Oranı (%)": [summary["TÜFE Artış (%)"], summary["Yİ-ÜFE Artış (%)"], summary["Ortalama (T+Ü)/2 (%)"]]
-            }
-            df_display = pd.DataFrame(detail_data)
-            
-            # Yeni ve Güvenli Gösterim Yöntemi: column_config
-            st.dataframe(
-                df_display,
-                column_config={
-                    "Endeks Tipi": "Tip",
-                    "Başlangıç Endeksi": st.column_config.NumberColumn(
-                        "Başlangıç Endeksi",
-                        format="%.2f"
-                    ),
-                    "Bitiş Endeksi": st.column_config.NumberColumn(
-                        "Bitiş Endeksi",
-                        format="%.2f"
-                    ),
-                    "Değişim Oranı (%)": st.column_config.NumberColumn(
-                        "Değişim Oranı",
-                        format="%.2f %%"
-                    ),
-                },
-                use_container_width=True,
-                hide_index=True
-            )
-
-            # 3. GRAFİK
-            st.subheader("📈 Dönem İçindeki Seyir")
-            if trend_df is not None:
-                fig = px.line(trend_df, x="Dönem", y=["TÜFE", "Yİ-ÜFE"], markers=True, 
-                              title="Seçilen Tarih Aralığındaki Endeks Değişimi")
-                st.plotly_chart(fig, use_container_width=True)
-
-            # 4. İNDİRME
-            csv = df_display.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "📥 Hesap Tablosunu İndir",
-                csv,
-                f"fiyat_farki_{start_date}_{end_date}.csv",
-                "text/csv"
-            )
-
-
-
+            st.warning("Seçilen kriterlere uygun veri bulunamadı.")
