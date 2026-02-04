@@ -5,6 +5,15 @@ from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 import plotly.express as px
 
+# sidebar'a veya ana ekrana ekleyin
+if st.sidebar.button("API Bağlantısını Test Et"):
+    try:
+        evds = evdsAPI(USER_API_KEY)
+        test_data = evds.get_data(["TP.FG.J0"], startdate="01-01-2025", enddate="01-01-2025")
+        st.sidebar.write(test_data)
+    except Exception as e:
+        st.sidebar.error(f"Bağlantı Hatası: {e}")
+
 # --- KULLANICI AYARLARI ---
 USER_API_KEY = "Uol1kIOQos"
 
@@ -155,3 +164,4 @@ if st.button("Hesapla"):
         # 3. KONTROL: Beklenmedik bir boş dönme durumu
         else:
             st.warning("Seçilen kriterlere uygun veri bulunamadı.")
+
