@@ -74,7 +74,7 @@ def get_custom_range_data(api_key, start, end):
     end_row = raw_df[raw_df['Tarih_Dt'].dt.to_period('M') == end_period]
     
     if start_row.empty or end_row.empty:
-        return None, "Seçilen tarihlerden biri için TCMB verisi bulunamadı.", None
+    return None, None, "Seçilen tarihlerden biri için TCMB verisi bulunamadı."
         
     if start_row.isnull().values.any() or end_row.isnull().values.any():
         return None, "Seçilen dönemde veri eksik.", None
@@ -109,13 +109,24 @@ def get_custom_range_data(api_key, start, end):
 
 if st.button("Hesapla"):
     with st.spinner('Veriler analiz ediliyor...'):
+        # Fonksiyondan gelen verileri alıyoruz
         summary, trend_df, error = get_custom_range_data(USER_API_KEY, start_date, end_date)
         
         if error:
-            st.error(error)
+            # Eğer error dolu gelirse (None değilse), summary muhtemelen None'dır.
+            # Bu yüzden summary['...'] koduna hiç girmeden burada duruyoruz.
+            st.error(f"❌ {error}")
+        
+        elif summary is not None:
+            # Sadece summary doluysa bu bloğa gir ve ekrana yazdır
+            st.success(f"Analiz Dönemi: {summary.get('Başlangıç Dönemi')} ➡️ {summary.get('Bitiş Dönemi')}")
+            
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("TÜFE Artışı", f"%{summary['TÜFE Artış (%)']:.2f}")
+            # ... (diğer metrikler)
         else:
-            # 1. SONUÇ KARTLARI
-            st.success(f"Analiz Dönemi: {summary['Başlangıç Dönemi']} ➡️ {summary['Bitiş Dönemi']}")
+            st.warning("Veri çekilemedi, lütfen API anahtarını veya tarihleri kontrol edin.")
             
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -176,3 +187,4 @@ if st.button("Hesapla"):
                 f"fiyat_farki_{start_date}_{end_date}.csv",
                 "text/csv"
             )
+
