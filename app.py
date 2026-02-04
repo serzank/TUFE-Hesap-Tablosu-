@@ -109,24 +109,15 @@ def get_custom_range_data(api_key, start, end):
 
 if st.button("Hesapla"):
     with st.spinner('Veriler analiz ediliyor...'):
-        # Fonksiyondan gelen verileri alıyoruz
         summary, trend_df, error = get_custom_range_data(USER_API_KEY, start_date, end_date)
         
         if error:
-            # Eğer error dolu gelirse (None değilse), summary muhtemelen None'dır.
-            # Bu yüzden summary['...'] koduna hiç girmeden burada duruyoruz.
+            # Hata varsa kullanıcıya göster ve alt satırlara geçme
             st.error(f"❌ {error}")
         
         elif summary is not None:
-            # Sadece summary doluysa bu bloğa gir ve ekrana yazdır
+            # 1. SONUÇ KARTLARI (Sadece veri varsa çalışır)
             st.success(f"Analiz Dönemi: {summary.get('Başlangıç Dönemi')} ➡️ {summary.get('Bitiş Dönemi')}")
-            
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("TÜFE Artışı", f"%{summary['TÜFE Artış (%)']:.2f}")
-            # ... (diğer metrikler)
-        else:
-            st.warning("Veri çekilemedi, lütfen API anahtarını veya tarihleri kontrol edin.")
             
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -135,6 +126,28 @@ if st.button("Hesapla"):
                 st.metric("Yİ-ÜFE Artışı", f"%{summary['Yİ-ÜFE Artış (%)']:.2f}")
             with c3:
                 st.metric("Ortalama (T+Ü)/2", f"%{summary['Ortalama (T+Ü)/2 (%)']:.2f}", delta="Sözleşme Farkı")
+
+            st.divider()
+
+            # 2. DETAY TABLOSU
+            st.subheader("📋 Detaylı Hesap Tablosu")
+            detail_data = {
+                "Endeks Tipi": ["TÜFE (Tüketici)", "Yİ-ÜFE (Üretici)", "Ortalama"],
+                "Başlangıç Endeksi": [summary["Başlangıç TÜFE"], summary["Başlangıç ÜFE"], None],
+                "Bitiş Endeksi": [summary["Bitiş TÜFE"], summary["Bitiş ÜFE"], None],
+                "Değişim Oranı (%)": [summary["TÜFE Artış (%)"], summary["Yİ-ÜFE Artış (%)"], summary["Ortalama (T+Ü)/2 (%)"]]
+            }
+            df_display = pd.DataFrame(detail_data)
+            
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+            # 3. GRAFİK
+            if trend_df is not None:
+                st.subheader("📈 Dönem İçindeki Seyir")
+                fig = px.line(trend_df, x="Dönem", y=["TÜFE", "Yİ-ÜFE"], markers=True)
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Beklenmedik bir veri hatası oluştu.")
 
             st.divider()
 
@@ -187,5 +200,6 @@ if st.button("Hesapla"):
                 f"fiyat_farki_{start_date}_{end_date}.csv",
                 "text/csv"
             )
+
 
 
